@@ -186,9 +186,14 @@ func (obp *OrderedBatchProcessor[I, O]) procResponseChannel(
 // Return individual items from batch results
 func (obp *OrderedBatchProcessor[I, O]) Results() iter.Seq[O] {
 	return func(yield func(O) bool) {
+		batch_num := -1
 		for batch := range obp.batchReturnChannel {
-			for _, item := range batch.Items {
+			batch_num++
+			for item_num, item := range batch.Items {
 				if item == nil {
+					obp.logger.Error("nil item in batch",
+						slog.Int("batch_num", batch_num),
+						slog.Int("item_num", item_num))
 					return
 				}
 				if !yield(item.Result()) {
