@@ -5,28 +5,28 @@ import (
 	"sync"
 )
 
-type OrderedBatch[I, O any] struct {
-	Items []*batchItem[I, O]
+type OrderedBatch[IN_T, OUT_T any] struct {
+	Items []*batchItem[IN_T, OUT_T]
 }
 
-type batchItem[I, O any] struct {
-	item                     I
+type batchItem[IN_T, OUT_T any] struct {
+	item                     IN_T
 	logger                   *slog.Logger
-	result                   O
+	result                   OUT_T
 	orderIndex               int
-	responseChannel          chan *batchItem[I, O]
+	responseChannel          chan *batchItem[IN_T, OUT_T]
 	responseChannelWrittenWg *sync.WaitGroup
 }
 
-func (item *batchItem[I, O]) Item() I {
+func (item *batchItem[IN_T, OUT_T]) Item() IN_T {
 	return item.item
 }
 
-func (item *batchItem[I, O]) Result() O {
+func (item *batchItem[IN_T, OUT_T]) Result() OUT_T {
 	return item.result
 }
 
-func (item *batchItem[I, O]) LogValue() slog.Value {
+func (item *batchItem[IN_T, OUT_T]) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.Int("orderIndex", item.orderIndex),
 		slog.Any("item", item.item),
