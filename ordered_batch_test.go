@@ -29,14 +29,14 @@ func TestOrderedBatch(t *testing.T) {
 	}
 
 	testCases := []testCase{
-		// {batchSize: 10, concurrency: 3, size: 5, name: "lt batchsize"},
-		// {batchSize: 10, concurrency: 3, size: 10, name: "eq batchsize"},
+		{batchSize: 10, concurrency: 3, size: 5, name: "lt batchsize"},
+		{batchSize: 10, concurrency: 3, size: 10, name: "eq batchsize"},
 		{batchSize: 10, concurrency: 3, size: 12, name: "gt batchsize"},
-		// {batchSize: 5, concurrency: 3, size: 20, name: "gt 2 batches"},
-		// {batchSize: 10, concurrency: 1, size: 12, name: "concurrency 1"},
-		// {batchSize: 3, concurrency: 3, size: 1, name: "size 1"},
-		// {batchSize: 7, concurrency: 10, size: 7,
-		// 	name: "concurrency gt size"},
+		{batchSize: 5, concurrency: 3, size: 20, name: "gt 2 batches"},
+		{batchSize: 10, concurrency: 1, size: 12, name: "concurrency 1"},
+		{batchSize: 3, concurrency: 3, size: 1, name: "size 1"},
+		{batchSize: 7, concurrency: 10, size: 7,
+			name: "concurrency gt size"},
 	}
 
 	for _, tc := range testCases {
