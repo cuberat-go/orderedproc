@@ -16,7 +16,7 @@ import (
 
 func TestOrderedBatch(t *testing.T) {
 	logLevel := new(slog.LevelVar)
-	logLevel.Set(slog.LevelInfo)
+	logLevel.Set(slog.LevelDebug)
 	slog.SetDefault(slog.New(slog.NewTextHandler(
 		os.Stderr, &slog.HandlerOptions{Level: logLevel}),
 	))
@@ -24,29 +24,29 @@ func TestOrderedBatch(t *testing.T) {
 	type testCase struct {
 		batchSize   int
 		concurrency int
-		rangeLimit  int
+		size        int
 		name        string
 	}
 
 	testCases := []testCase{
-		{batchSize: 10, concurrency: 3, rangeLimit: 5, name: "lt batchsize"},
-		{batchSize: 10, concurrency: 3, rangeLimit: 10, name: "eq batchsize"},
-		{batchSize: 10, concurrency: 3, rangeLimit: 12, name: "gt batchsize"},
-		// {batchSize: 5, concurrency: 3, rangeLimit: 20, name: "gt 2 batches"},
-		// {batchSize: 10, concurrency: 1, rangeLimit: 12, name: "concurrency 1"},
-		{batchSize: 3, concurrency: 3, rangeLimit: 1, name: "size 1"},
-		// {batchSize: 7, concurrency: 10, rangeLimit: 7,
+		// {batchSize: 10, concurrency: 3, size: 5, name: "lt batchsize"},
+		// {batchSize: 10, concurrency: 3, size: 10, name: "eq batchsize"},
+		{batchSize: 10, concurrency: 3, size: 12, name: "gt batchsize"},
+		// {batchSize: 5, concurrency: 3, size: 20, name: "gt 2 batches"},
+		// {batchSize: 10, concurrency: 1, size: 12, name: "concurrency 1"},
+		// {batchSize: 3, concurrency: 3, size: 1, name: "size 1"},
+		// {batchSize: 7, concurrency: 10, size: 7,
 		// 	name: "concurrency gt size"},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			testOne(t, tc.batchSize, tc.concurrency, tc.rangeLimit)
+			testOne(t, tc.batchSize, tc.concurrency, tc.size)
 		})
 	}
 }
 
-func testOne(t *testing.T, batchSize int, concurrency int, rangeLimit int) {
+func testOne(t *testing.T, batchSize int, concurrency int, size int) {
 
 	procFunc := func(item int) int {
 		return item * 2
@@ -54,13 +54,13 @@ func testOne(t *testing.T, batchSize int, concurrency int, rangeLimit int) {
 	proc := batchproc.NewOrderedBatchProcessor(procFunc, batchSize, concurrency)
 
 	go func() {
-		for i := range rangeLimit {
+		for i := range size {
 			proc.Add(i)
 		}
 		proc.Done()
 	}()
-	expected := make([]int, rangeLimit)
-	for i := range rangeLimit {
+	expected := make([]int, size)
+	for i := range size {
 		expected[i] = i * 2
 	}
 

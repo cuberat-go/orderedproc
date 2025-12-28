@@ -4,6 +4,8 @@ import (
 	"iter"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 )
 
@@ -40,6 +42,24 @@ type OrderedBatchProcessor[IN_T, OUT_T any] struct {
 	procFunc ProcFunc[IN_T, OUT_T]
 }
 
+func logAttrReplacer() func(groups []string, a slog.Attr) slog.Attr {
+	_, this_file, _, _ := runtime.Caller(0)
+	orig_dir := filepath.Dir(this_file)
+
+	return func(groups []string, a slog.Attr) slog.Attr {
+		var err error
+		if a.Key == slog.SourceKey {
+			source := a.Value.Any().(*slog.Source)
+			// source.File = filepath.Base(source.File)
+			source.File, err = filepath.Rel(orig_dir, source.File)
+			if err != nil {
+				source.File = filepath.Base(source.File)
+			}
+		}
+		return a
+	}
+}
+
 // Creates a new OrderedBatchProcessor.
 func NewOrderedBatchProcessor[IN_T, OUT_T any](
 	procFunc ProcFunc[IN_T, OUT_T],
@@ -47,20 +67,20 @@ func NewOrderedBatchProcessor[IN_T, OUT_T any](
 	concurrency int,
 ) *OrderedBatchProcessor[IN_T, OUT_T] {
 	logLevel := new(slog.LevelVar)
-	logLevel.Set(slog.LevelError)
+	logLevel.Set(slog.LevelDebug)
 	logger := slog.New(slog.NewTextHandler(
-		os.Stderr, &slog.HandlerOptions{Level: logLevel}),
+		os.Stderr, &slog.HandlerOptions{Level: logLevel, AddSource: true,
+			ReplaceAttr: logAttrReplacer()}),
 	)
 
 	obp := &OrderedBatchProcessor[IN_T, OUT_T]{
 		logger:            logger,
 		procFunc:          procFunc,
 		batchSize:         batchSize,
-		lastOrderIndex:    -1,
 		concurrency:       concurrency,
 		newItemChan:       make(chan *batchItem[IN_T, OUT_T], batchSize),
-		batchResponseChan: make(chan *OrderedBatch[IN_T, OUT_T], 2),
 		toProcChan:        make(chan *batchItem[IN_T, OUT_T], batchSize),
+		batchResponseChan: make(chan *OrderedBatch[IN_T, OUT_T], 2),
 	}
 	go obp.run()
 	return obp
@@ -68,97 +88,130 @@ func NewOrderedBatchProcessor[IN_T, OUT_T any](
 
 // Adds an item to be processed.
 func (obp *OrderedBatchProcessor[IN_T, OUT_T]) Add(item IN_T) {
-	obp.lastOrderIndex++
-	if obp.lastOrderIndex >= obp.batchSize {
-		obp.lastOrderIndex = 0
-	}
 	obp.newItemChan <- &batchItem[IN_T, OUT_T]{
-		item:       item,
-		orderIndex: obp.lastOrderIndex,
-		logger:     obp.logger,
+		item:   item,
+		logger: obp.logger,
 	}
 }
 
 // Signals that no more items will be added.
 func (obp *OrderedBatchProcessor[IN_T, OUT_T]) Done() {
-	obp.logger.Debug("Finish() called")
 	close(obp.newItemChan)
 }
 
 func (obp *OrderedBatchProcessor[IN_T, OUT_T]) run() {
 	var (
-		workerWg                 sync.WaitGroup
+		itemProcWg               sync.WaitGroup
 		responseProcWg           sync.WaitGroup
 		responseChannel          chan *batchItem[IN_T, OUT_T]
 		responseChannelWrittenWg *sync.WaitGroup
 	)
 
+	obp.logger.Debug("starting processing routines",
+		"concurrency", obp.concurrency,
+	)
 	for range obp.concurrency {
-		workerWg.Go(func() { obp.processItems() })
+		itemProcWg.Go(func() { obp.processItems() })
 	}
 
 	addedCount := obp.batchSize // Force initialization of first batch.
+	batch_num := -1
+	lastOrderIndex := -1
 	for item := range obp.newItemChan {
 		if addedCount >= obp.batchSize {
 			if responseChannelWrittenWg != nil {
-				obp.closeResponseChannelWhenDone(responseChannelWrittenWg,
-					responseChannel)
+				// Close previous batch's response channel when all writes
+				// to the response channel are done.
+				obp.asyncWaitResponseCompletion(responseChannelWrittenWg,
+					responseChannel, batch_num)
 			}
 			responseChannelWrittenWg = &sync.WaitGroup{}
 			responseChannel = make(chan *batchItem[IN_T, OUT_T], obp.batchSize)
+			batch_num++
+			obp.logger.Debug("created response chan",
+				"channel", responseChannel, "batch_num", batch_num)
 			responseProcWg.Go(func() {
 				obp.procResponseChannel(responseChannel)
 			})
 
 			addedCount = 0
+			lastOrderIndex = -1
 		}
+
+		lastOrderIndex++
+		item.orderIndex = lastOrderIndex
 
 		obp.queueForProcessing(item, responseChannel,
 			responseChannelWrittenWg)
 		addedCount++
 	}
 
+	// Since we've exhausted newItemChan, and each item has been sent to
+	// toProcChan, we can now close toProcChan to signal no more items
+	// will be sent.
 	close(obp.toProcChan)
 
-	responseChannelWrittenWg.Wait()
-	close(responseChannel)
+	// Close the last batch's response channel when all writes to it are done.
+	obp.waitResponseCompletion(responseChannelWrittenWg, responseChannel,
+		batch_num)
+	// responseChannelWrittenWg.Wait()
+	// close(responseChannel)
 
-	// Wait for worker routines to finish.
-	workerWg.Wait()
+	// Wait for processing routines to finish.
+	itemProcWg.Wait()
 
 	// Wait for response processing to finish.
 	responseProcWg.Wait()
 
-	// Signal that we've completed all batches.
+	// Signal that we've completed writing all results.
 	close(obp.batchResponseChan)
 }
 
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) closeResponseChannelWhenDone(
+func (obp *OrderedBatchProcessor[IN_T, OUT_T]) waitResponseCompletion(
 	wg *sync.WaitGroup,
 	rc chan *batchItem[IN_T, OUT_T],
+	batch_num int,
 ) {
-	go func(wg *sync.WaitGroup, rc chan *batchItem[IN_T, OUT_T]) {
-		wg.Wait()
-		close(rc)
-	}(wg, rc)
+	obp.logger.Debug("waiting for response channel writes to complete",
+		"channel", rc, "batch_num", batch_num)
+	wg.Wait()
+	close(rc)
+	obp.logger.Debug("closed response channel",
+		"channel", rc, "batch_num", batch_num)
+}
+
+func (obp *OrderedBatchProcessor[IN_T, OUT_T]) asyncWaitResponseCompletion(
+	wg *sync.WaitGroup,
+	rc chan *batchItem[IN_T, OUT_T],
+	batch_num int,
+) {
+	go obp.waitResponseCompletion(wg, rc, batch_num)
 }
 
 func (obp *OrderedBatchProcessor[IN_T, OUT_T]) queueForProcessing(
-	batchItem *batchItem[IN_T, OUT_T],
+	item *batchItem[IN_T, OUT_T],
 	responseChannel chan *batchItem[IN_T, OUT_T],
 	responseChannelWrittenWg *sync.WaitGroup,
 ) {
-	batchItem.responseChannel = responseChannel
-	batchItem.responseChannelWrittenWg = responseChannelWrittenWg
+	item.responseChannel = responseChannel
+	item.responseChannelWrittenWg = responseChannelWrittenWg
 	responseChannelWrittenWg.Add(1)
-	obp.toProcChan <- batchItem
+	obp.toProcChan <- item // Send item for processing by processItems().
 }
 
 // Processes items (calls the function provided by the user).
 func (obp *OrderedBatchProcessor[IN_T, OUT_T]) processItems() {
 	for batchItem := range obp.toProcChan {
+		if batchItem == nil {
+			obp.logger.Debug("nil item in toProcChan")
+		}
+
+		// Call user func.
 		resp := obp.procFunc(batchItem.Item())
+
 		batchItem.result = resp
+
+		// Send to be processed by procResponseChannel().
 		batchItem.responseChannel <- batchItem
 		batchItem.responseChannelWrittenWg.Done()
 	}
@@ -174,7 +227,11 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) procResponseChannel(
 
 	cnt := 0
 	for respItem := range responseChannel {
+		if respItem == nil {
+			obp.logger.Debug("nil item in response channel")
+		}
 		batch[respItem.orderIndex] = respItem
+		obp.logger.Debug("added item to batch", "item", respItem.LogValue())
 		if respItem.orderIndex > largestIndex {
 			largestIndex = respItem.orderIndex
 		}
@@ -186,7 +243,12 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) procResponseChannel(
 	}
 
 	if largestIndex+1 < obp.batchSize {
-		batch = batch[:largestIndex+1]
+		// batch = batch[:largestIndex+1]
+		obp.logger.Debug("shrinking batch", "largestIndex", largestIndex,
+			"batchSize", obp.batchSize, "count", cnt)
+	} else {
+		obp.logger.Debug("completed full batch", "largestIndex", largestIndex,
+			"batchSize", obp.batchSize, "count", cnt)
 	}
 
 	obp.batchResponseChan <- &OrderedBatch[IN_T, OUT_T]{Items: batch}
@@ -203,7 +265,7 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) Results() iter.Seq[OUT_T] {
 					obp.logger.Error("nil item in batch",
 						slog.Int("batch_num", batch_num),
 						slog.Int("item_num", item_num))
-					return
+					continue
 				}
 				if !yield(item.Result()) {
 					return
