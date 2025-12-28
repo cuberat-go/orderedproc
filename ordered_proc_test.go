@@ -47,7 +47,8 @@ func TestOrderedBatch(t *testing.T) {
 	}
 }
 
-func TestExample(t *testing.T) {
+// func TestExample(t *testing.T) {
+func ExampleOrderedProcessor_Results() {
 	size := 7 // input will be 0..6
 
 	procFunc := func(item int) int {
@@ -67,6 +68,29 @@ func TestExample(t *testing.T) {
 	fmt.Printf("Results: %v\n", got)
 	// Output:
 	// Results: [0 2 4 6 8 10 12]
+}
+
+// func TestExample2(t *testing.T) {
+func ExampleOrderedProcessor_ResultBatches() {
+	size := 7 // input will be 0..6
+
+	procFunc := func(item int) int {
+		return item * 2
+	}
+
+	proc := orderedproc.NewOrderedProcessor(procFunc, 5, 3)
+
+	go func() {
+		for i := range size {
+			proc.Add(i)
+		}
+		proc.Done()
+	}()
+
+	got := slices.Collect(proc.ResultBatches())
+	fmt.Printf("Results: %v\n", got)
+	// Output:
+	// Results: [[0 2 4 6 8] [10 12]]
 }
 
 func testOne(t *testing.T, batchSize int, concurrency int, size int) {

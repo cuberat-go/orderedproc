@@ -253,7 +253,7 @@ func (obp *OrderedProcessor[IN_T, OUT_T]) populateBatch(
 	)
 
 	largestIndex := -1
-	batch := make([]*batchItem[IN_T, OUT_T], obp.batchSize)
+	batch := make([]OUT_T, obp.batchSize)
 
 	defer curBatchWg.Done()
 	defer obp.logger.Debug("completed batch", "batchNum", batchNum)
@@ -263,7 +263,8 @@ func (obp *OrderedProcessor[IN_T, OUT_T]) populateBatch(
 		if respItem == nil {
 			obp.logger.Debug("nil item in response channel")
 		}
-		batch[respItem.orderIndex] = respItem
+		// batch[respItem.orderIndex] = respItem
+		batch[respItem.orderIndex] = respItem.Result()
 		obp.logger.Debug("added item to batch", "item", respItem.LogValue())
 		if respItem.orderIndex > largestIndex {
 			largestIndex = respItem.orderIndex
@@ -300,20 +301,12 @@ func (obp *OrderedProcessor[IN_T, OUT_T]) populateBatch(
 	obp.batchResponseChan <- &OrderedBatch[IN_T, OUT_T]{Items: batch}
 }
 
-// Return individual items from batch results
+// Returns an iterator over individual results
 func (obp *OrderedProcessor[IN_T, OUT_T]) Results() iter.Seq[OUT_T] {
 	return func(yield func(OUT_T) bool) {
-		batch_num := -1
 		for batch := range obp.batchResponseChan {
-			batch_num++
-			for item_num, item := range batch.Items {
-				if item == nil {
-					obp.logger.Error("nil item in batch",
-						slog.Int("batch_num", batch_num),
-						slog.Int("item_num", item_num))
-					continue
-				}
-				if !yield(item.Result()) {
+			for _, item := range batch.Items {
+				if !yield(item) {
 					return
 				}
 			}
@@ -321,23 +314,13 @@ func (obp *OrderedProcessor[IN_T, OUT_T]) Results() iter.Seq[OUT_T] {
 	}
 }
 
-// Return batches of results.
-// func (obp *OrderedProcessor[IN_T, OUT_T]) ResultBatches() iter.Seq[[]OUT_T] {
-// 	return func(yield func([]OUT_T) bool) {
-// 		batch_num := -1
-// 		for batch := range obp.batchResponseChan {
-// 			batch_num++
-// 			for item_num, item := range batch.Items {
-// 				if item == nil {
-// 					obp.logger.Error("nil item in batch",
-// 						slog.Int("batch_num", batch_num),
-// 						slog.Int("item_num", item_num))
-// 					continue
-// 				}
-// 				if !yield(item.Result()) {
-// 					return
-// 				}
-// 			}
-// 		}
-// 	}
-// }
+// Returns an iterator over batches of results.
+func (obp *OrderedProcessor[IN_T, OUT_T]) ResultBatches() iter.Seq[[]OUT_T] {
+	return func(yield func([]OUT_T) bool) {
+		for batch := range obp.batchResponseChan {
+			if !yield(batch.Items) {
+				return
+			}
+		}
+	}
+}

@@ -53,3 +53,5 @@ Example:
     // Output:
     // Results: [0 2 4 6 8 10 12]
 ```
+
+If you prefer to iterate over batches of results, call the `ResultBatches()` method.

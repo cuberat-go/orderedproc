@@ -6,7 +6,8 @@ import (
 )
 
 type OrderedBatch[IN_T, OUT_T any] struct {
-	Items []*batchItem[IN_T, OUT_T]
+	// Items []*batchItem[IN_T, OUT_T]
+	Items []OUT_T
 }
 
 type batchItem[IN_T, OUT_T any] struct {
