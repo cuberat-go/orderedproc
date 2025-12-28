@@ -1,4 +1,4 @@
-package batchproc
+package orderedproc
 
 import (
 	"log/slog"

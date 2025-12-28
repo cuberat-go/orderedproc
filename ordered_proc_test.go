@@ -1,4 +1,4 @@
-package batchproc_test
+package orderedproc_test
 
 import (
 	// Built-in/core modules.
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	// First-party modules.
-	"github.com/cuberat-go/batchproc"
+	"github.com/cuberat-go/orderedproc"
 )
 
 func TestOrderedBatch(t *testing.T) {
@@ -51,7 +51,8 @@ func testOne(t *testing.T, batchSize int, concurrency int, size int) {
 	procFunc := func(item int) int {
 		return item * 2
 	}
-	proc := batchproc.NewOrderedBatchProcessor(procFunc, batchSize, concurrency)
+	proc := orderedproc.NewOrderedProcessor(procFunc,
+		batchSize, concurrency)
 
 	go func() {
 		for i := range size {
@@ -63,8 +64,6 @@ func testOne(t *testing.T, batchSize int, concurrency int, size int) {
 	for i := range size {
 		expected[i] = i * 2
 	}
-
-	slog.Debug("Collecting results")
 
 	got := slices.Collect(proc.Results())
 

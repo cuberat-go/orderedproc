@@ -1,4 +1,4 @@
-package batchproc
+package orderedproc
 
 import (
 	"iter"
@@ -12,7 +12,7 @@ import (
 // Type definition for the user-provided processing function.
 type ProcFunc[IN_T, OUT_T any] func(IN_T) OUT_T
 
-type OrderedBatchProcessor[IN_T, OUT_T any] struct {
+type OrderedProcessor[IN_T, OUT_T any] struct {
 	// Maximum size of each batch.
 	batchSize int
 
@@ -60,20 +60,20 @@ func logAttrReplacer() func(groups []string, a slog.Attr) slog.Attr {
 	}
 }
 
-// Creates a new OrderedBatchProcessor.
-func NewOrderedBatchProcessor[IN_T, OUT_T any](
+// Creates a new OrderedProcessor.
+func NewOrderedProcessor[IN_T, OUT_T any](
 	procFunc ProcFunc[IN_T, OUT_T],
 	batchSize int,
 	concurrency int,
-) *OrderedBatchProcessor[IN_T, OUT_T] {
+) *OrderedProcessor[IN_T, OUT_T] {
 	logLevel := new(slog.LevelVar)
-	logLevel.Set(slog.LevelDebug)
+	logLevel.Set(slog.LevelError)
 	logger := slog.New(slog.NewTextHandler(
 		os.Stderr, &slog.HandlerOptions{Level: logLevel, AddSource: true,
 			ReplaceAttr: logAttrReplacer()}),
 	)
 
-	obp := &OrderedBatchProcessor[IN_T, OUT_T]{
+	obp := &OrderedProcessor[IN_T, OUT_T]{
 		logger:            logger,
 		procFunc:          procFunc,
 		batchSize:         batchSize,
@@ -87,7 +87,7 @@ func NewOrderedBatchProcessor[IN_T, OUT_T any](
 }
 
 // Adds an item to be processed.
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) Add(item IN_T) {
+func (obp *OrderedProcessor[IN_T, OUT_T]) Add(item IN_T) {
 	obp.newItemChan <- &batchItem[IN_T, OUT_T]{
 		item:   item,
 		logger: obp.logger,
@@ -95,11 +95,11 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) Add(item IN_T) {
 }
 
 // Signals that no more items will be added.
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) Done() {
+func (obp *OrderedProcessor[IN_T, OUT_T]) Done() {
 	close(obp.newItemChan)
 }
 
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) run() {
+func (obp *OrderedProcessor[IN_T, OUT_T]) run() {
 	var (
 		itemProcWg               sync.WaitGroup
 		responseProcWg           sync.WaitGroup
@@ -185,7 +185,7 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) run() {
 	close(obp.batchResponseChan)
 }
 
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) waitResponseCompletion(
+func (obp *OrderedProcessor[IN_T, OUT_T]) waitResponseCompletion(
 	wg *sync.WaitGroup,
 	rc chan *batchItem[IN_T, OUT_T],
 	batch_num int,
@@ -198,7 +198,7 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) waitResponseCompletion(
 		"channel", rc, "batch_num", batch_num)
 }
 
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) asyncWaitResponseCompletion(
+func (obp *OrderedProcessor[IN_T, OUT_T]) asyncWaitResponseCompletion(
 	wg *sync.WaitGroup,
 	rc chan *batchItem[IN_T, OUT_T],
 	batch_num int,
@@ -206,7 +206,7 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) asyncWaitResponseCompletion(
 	go obp.waitResponseCompletion(wg, rc, batch_num)
 }
 
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) queueForProcessing(
+func (obp *OrderedProcessor[IN_T, OUT_T]) queueForProcessing(
 	item *batchItem[IN_T, OUT_T],
 	responseChannel chan *batchItem[IN_T, OUT_T],
 	responseChannelWrittenWg *sync.WaitGroup,
@@ -218,7 +218,7 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) queueForProcessing(
 }
 
 // Processes items (calls the function provided by the user).
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) processItems() {
+func (obp *OrderedProcessor[IN_T, OUT_T]) processItems() {
 	for batchItem := range obp.toProcChan {
 		if batchItem == nil {
 			obp.logger.Debug("nil item in toProcChan")
@@ -237,7 +237,7 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) processItems() {
 
 // Processes the responses for a given batch, sending them in an ordered batch
 // to the batch return channel.
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) populateBatch(
+func (obp *OrderedProcessor[IN_T, OUT_T]) populateBatch(
 	responseChannel chan *batchItem[IN_T, OUT_T],
 	lastBatchWg *sync.WaitGroup,
 	curBatchWg *sync.WaitGroup,
@@ -298,7 +298,7 @@ func (obp *OrderedBatchProcessor[IN_T, OUT_T]) populateBatch(
 }
 
 // Return individual items from batch results
-func (obp *OrderedBatchProcessor[IN_T, OUT_T]) Results() iter.Seq[OUT_T] {
+func (obp *OrderedProcessor[IN_T, OUT_T]) Results() iter.Seq[OUT_T] {
 	return func(yield func(OUT_T) bool) {
 		batch_num := -1
 		for batch := range obp.batchResponseChan {

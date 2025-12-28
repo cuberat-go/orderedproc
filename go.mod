@@ -1,4 +1,4 @@
-module github.com/cuberat-go/batchproc
+module github.com/cuberat-go/orderedproc
 
 go 1.25.5
 
