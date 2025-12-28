@@ -12,6 +12,9 @@ import (
 // Type definition for the user-provided processing function.
 type ProcFunc[IN_T, OUT_T any] func(IN_T) OUT_T
 
+// An OrderedProcessor processes items in batches with a specified concurrency,
+// ensuring that the results are output in the same order as the input
+// items. Create one using NewOrderedProcessor().
 type OrderedProcessor[IN_T, OUT_T any] struct {
 	// Maximum size of each batch.
 	batchSize int
@@ -317,3 +320,24 @@ func (obp *OrderedProcessor[IN_T, OUT_T]) Results() iter.Seq[OUT_T] {
 		}
 	}
 }
+
+// Return batches of results.
+// func (obp *OrderedProcessor[IN_T, OUT_T]) ResultBatches() iter.Seq[[]OUT_T] {
+// 	return func(yield func([]OUT_T) bool) {
+// 		batch_num := -1
+// 		for batch := range obp.batchResponseChan {
+// 			batch_num++
+// 			for item_num, item := range batch.Items {
+// 				if item == nil {
+// 					obp.logger.Error("nil item in batch",
+// 						slog.Int("batch_num", batch_num),
+// 						slog.Int("item_num", item_num))
+// 					continue
+// 				}
+// 				if !yield(item.Result()) {
+// 					return
+// 				}
+// 			}
+// 		}
+// 	}
+// }

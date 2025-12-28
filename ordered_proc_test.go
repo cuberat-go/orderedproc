@@ -2,6 +2,7 @@ package orderedproc_test
 
 import (
 	// Built-in/core modules.
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
@@ -46,11 +47,38 @@ func TestOrderedBatch(t *testing.T) {
 	}
 }
 
-func testOne(t *testing.T, batchSize int, concurrency int, size int) {
+func TestExample(t *testing.T) {
+	size := 7 // input will be 0..6
 
 	procFunc := func(item int) int {
 		return item * 2
 	}
+
+	proc := orderedproc.NewOrderedProcessor(procFunc, 5, 3)
+
+	go func() {
+		for i := range size {
+			proc.Add(i)
+		}
+		proc.Done()
+	}()
+
+	got := slices.Collect(proc.Results())
+	fmt.Printf("Results: %v\n", got)
+	// Output:
+	// Results: [0 2 4 6 8 10 12]
+}
+
+func testOne(t *testing.T, batchSize int, concurrency int, size int) {
+	expected := make([]int, size)
+	for i := range size {
+		expected[i] = i * 2
+	}
+
+	procFunc := func(item int) int {
+		return item * 2
+	}
+
 	proc := orderedproc.NewOrderedProcessor(procFunc,
 		batchSize, concurrency)
 
@@ -60,10 +88,6 @@ func testOne(t *testing.T, batchSize int, concurrency int, size int) {
 		}
 		proc.Done()
 	}()
-	expected := make([]int, size)
-	for i := range size {
-		expected[i] = i * 2
-	}
 
 	got := slices.Collect(proc.Results())
 
